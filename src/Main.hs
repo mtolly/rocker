@@ -9,12 +9,16 @@ import System.IO (hSetBuffering, BufferMode(NoBuffering), stdout)
 import Text.Read (readMaybe)
 import System.Exit (exitFailure)
 
+import Instruments
+
 withSource :: Source -> Maybe ClientCallback -> (Connection -> IO a) -> IO a
 withSource src cc = bracket (openSource src cc) close
 
 withDestination :: Destination -> (Connection -> IO a) -> IO a
 withDestination dst = bracket (openDestination dst) close
 
+-- | Display a dialog which asks the user to pick a number corresponding to
+-- a choice from a list.
 promptInt :: String -> [(Int, a)] -> IO a
 promptInt prompt choices = do
   hSetBuffering stdout NoBuffering
@@ -28,6 +32,7 @@ promptInt prompt choices = do
         Nothing -> putStrLn "Not an option." >> loop
         Just x -> return x
 
+-- | Prompt the user to pick a MIDI source.
 getSource :: IO Source
 getSource = do
   srcs <- fmap (zip [1..]) enumerateSources
@@ -40,6 +45,7 @@ getSource = do
     putStrLn $ show i ++ ") " ++ name
   promptInt "Which source?" srcs
 
+-- | Prompt the user to pick a MIDI destination.
 getDestination :: IO Destination
 getDestination = do
   dsts <- fmap (zip [1..]) enumerateDestinations
@@ -52,28 +58,18 @@ getDestination = do
     putStrLn $ show i ++ ") " ++ name
   promptInt "Which destination?" dsts
 
-data Drum = Kick | Snare | TomY | TomB | TomG | CymY | CymB | CymG
-  deriving (Eq, Ord, Show, Read, Enum, Bounded)
-
-playDrum :: Drum -> Connection -> IO ()
-playDrum d con = let
-  pitch = case d of
-    Kick  -> 33
-    Snare -> 38
-    TomY  -> 48
-    TomB  -> 45
-    TomG  -> 41
-    CymY  -> 22
-    CymB  -> 51
-    CymG  -> 49
-  in send con $ MidiMessage 1 $ NoteOn pitch 96
-
-q49ToDrum :: Int -> Maybe Drum
-q49ToDrum p = let
+-- | A layout for playing drums with a keyboard. Uses symmetrical layouts for
+-- the left and right hands, with white keys as drums and black as cymbals,
+-- and also uses the sustain pedal as the kick drum.
+onyxDrums :: MidiMessage -> Maybe Drum
+onyxDrums mm = let
   rightDrums = [Kick, CymY, Snare, TomY, CymB, TomB, CymG, TomG]
   rightHand = zip [45 ..] rightDrums
   leftHand = zip [43, 42 ..] rightDrums
-  in lookup p $ rightHand ++ leftHand
+  in case mm of
+    MidiMessage _ (NoteOn k _) -> lookup k $ rightHand ++ leftHand
+    MidiMessage _ (CC 64 127)  -> Just Kick
+    _                          -> Nothing
 
 main :: IO ()
 main = do
@@ -86,13 +82,10 @@ main = do
       fix $ \loop -> do
         evt <- getNextEvent scon
         case evt of
-          Just (MidiEvent _ (MidiMessage _ (NoteOn k _))) -> case q49ToDrum k of
-            Just d  -> do
-              playDrum d dcon
+          Just (MidiEvent _ mm) -> case onyxDrums mm of
+            Just d -> do
+              send dcon $ drumMessage d
               print d
             Nothing -> return ()
-          Just (MidiEvent _ (MidiMessage _ (CC 64 127))) -> do
-            playDrum Kick dcon
-            print Kick
-          _ -> return ()
+          Nothing -> return ()
         threadDelay 100 >> loop
