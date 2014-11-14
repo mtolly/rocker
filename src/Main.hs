@@ -9,7 +9,8 @@ import System.IO (hSetBuffering, BufferMode(NoBuffering), stdout)
 import Text.Read (readMaybe)
 import System.Exit (exitFailure)
 
-import Instruments
+import qualified Drums as D
+import qualified ProGuitar as PG
 
 withSource :: Source -> Maybe ClientCallback -> (Connection -> IO a) -> IO a
 withSource src cc = bracket (openSource src cc) close
@@ -61,14 +62,14 @@ getDestination = do
 -- | A layout for playing drums with a keyboard. Uses symmetrical layouts for
 -- the left and right hands, with white keys as drums and black as cymbals,
 -- and also uses the sustain pedal as the kick drum.
-onyxDrums :: MidiMessage -> Maybe Drum
+onyxDrums :: MidiMessage -> Maybe D.Command
 onyxDrums mm = let
-  rightDrums = [Kick, CymY, Snare, TomY, CymB, TomB, CymG, TomG]
+  rightDrums = [D.Kick, D.CymY, D.Snare, D.TomY, D.CymB, D.TomB, D.CymG, D.TomG]
   rightHand = zip [45 ..] rightDrums
   leftHand = zip [43, 42 ..] rightDrums
   in case mm of
     MidiMessage _ (NoteOn k _) -> lookup k $ rightHand ++ leftHand
-    MidiMessage _ (CC 64 127)  -> Just Kick
+    MidiMessage _ (CC 64 127)  -> Just D.Kick
     _                          -> Nothing
 
 main :: IO ()
@@ -84,8 +85,10 @@ main = do
         case evt of
           Just (MidiEvent _ mm) -> case onyxDrums mm of
             Just d -> do
-              send dcon $ drumMessage d
+              send dcon $ MidiMessage 1 $ D.sendCommand d
               print d
-            Nothing -> return ()
+            Nothing -> do
+              print mm
+              return ()
           Nothing -> return ()
         threadDelay 100 >> loop
