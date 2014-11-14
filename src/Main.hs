@@ -1,4 +1,4 @@
-module Main where
+module Main (main) where
 
 import System.MIDI
 import Control.Monad
@@ -8,6 +8,8 @@ import Control.Monad.Fix (fix)
 import System.IO (hSetBuffering, BufferMode(NoBuffering), stdout)
 import Text.Read (readMaybe)
 import System.Exit (exitFailure)
+import Control.Monad.Trans.State
+import Control.Monad.Trans.Class
 
 import qualified Drums as D
 import qualified ProGuitar as PG
@@ -72,23 +74,34 @@ onyxDrums mm = let
     MidiMessage _ (CC 64 127)  -> Just D.Kick
     _                          -> Nothing
 
-main :: IO ()
-main = do
+onyxDrums' :: MidiMessage -> StateT s IO [MidiMessage]
+onyxDrums' mm = return $ case onyxDrums mm of
+  Nothing  -> []
+  Just mm' -> [MidiMessage 1 $ D.sendCommand mm']
+
+viewPG :: MidiMessage -> StateT s IO [MidiMessage]
+viewPG mm = lift $ do
+  print mm
+  case mm of
+    SysEx bytes -> case PG.receiveCommand bytes of
+      Just cmd -> print cmd
+      Nothing -> return ()
+    _ -> return ()
+  return []
+
+translate :: s -> (MidiMessage -> StateT s IO [MidiMessage]) -> IO ()
+translate initState f = do
   src <- getSource
   dst <- getDestination
   withSource src Nothing $ \scon ->
     withDestination dst $ \dcon -> do
       start scon
       putStrLn "Running. Ctrl+C to quit."
-      fix $ \loop -> do
-        evt <- getNextEvent scon
+      flip evalStateT initState $ forever $ do
+        evt <- lift $ getNextEvent scon
         case evt of
-          Just (MidiEvent _ mm) -> case onyxDrums mm of
-            Just d -> do
-              send dcon $ MidiMessage 1 $ D.sendCommand d
-              print d
-            Nothing -> do
-              print mm
-              return ()
-          Nothing -> return ()
-        threadDelay 100 >> loop
+          Just (MidiEvent _ mm) -> f mm >>= mapM_ (lift . send dcon)
+          Nothing -> lift $ threadDelay 100
+
+main :: IO ()
+main = translate () onyxDrums'

@@ -37,6 +37,21 @@ data Buttons = Buttons
   , buttonTilt :: Bool
   } deriving (Eq, Ord, Show, Read)
 
+noButtons :: Buttons
+noButtons = Buttons
+  { buttonX = False
+  , buttonA = False
+  , buttonB = False
+  , buttonY = False
+  , buttonBack = False
+  , buttonStart = False
+  , buttonXbox = False
+  , buttonSync = False
+  , buttonDpad = Center
+  , button32 = False
+  , buttonTilt = False
+  }
+
 data Dpad
   = Up
   | UpRight
@@ -77,7 +92,8 @@ sendCommand (cont, msg) = let
     Strum str vel -> [5, strNumber str, fromIntegral vel]
     KeepAlive -> 9 : replicate 12 0
     ChangeButtons btns -> let flag n f = if f btns then n else 0 in
-      [ foldr (.|.) 0
+      [ 8
+      , foldr (.|.) 0
         [ flag 1 buttonX
         , flag 2 buttonA
         , flag 4 buttonB
@@ -119,8 +135,8 @@ receiveCommand = magic where
   msg (9 : rest) = do
     guard $ rest == replicate 12 0
     return KeepAlive
-  msg [8, b1, b2, b3] = do
-    dpad <- lookupTable (fromIntegral . fromEnum) $ b1 .&. 15
+  msg [8, b1, b2, b3, 0] = do
+    dpad <- lookupTable (fromIntegral . fromEnum) $ b3 .&. 15
     return $ ChangeButtons $ Buttons
       { buttonX = test 1 b1
       , buttonA = test 2 b1
